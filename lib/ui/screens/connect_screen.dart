@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
-import '../../main.dart'; // bleProvider
+import 'package:smart_knee/main.dart'; // bleProvider
+import 'package:smart_knee/ble/ble_manager.dart';
 
 class ConnectScreen extends ConsumerStatefulWidget {
   const ConnectScreen({super.key});
@@ -29,12 +30,8 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
       return;
     }
 
-    setState(() {
-      _scanning = true;
-    });
-
+    setState(() => _scanning = true);
     final found = await ble.scanForSevidDevices();
-
     setState(() {
       _devices = found;
       _scanning = false;
@@ -45,9 +42,12 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
     final ble = ref.read(bleProvider);
     try {
       await ble.connect(d);
-      setState(() {
-        _connected = true;
-      });
+      setState(() => _connected = true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Conectado a ${d.name.isEmpty ? d.id : d.name}')),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -66,7 +66,6 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
       appBar: AppBar(
         title: Text(ble.isConnected ? "Conectado" : "Conexión a rodillera"),
         actions: [
-          // Acceso directo al historial desde cualquier estado
           IconButton(
             icon: const Icon(Icons.history),
             onPressed: () => Navigator.pushNamed(context, '/history'),
@@ -102,9 +101,7 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
               itemBuilder: (context, i) {
                 final d = _devices[i];
                 return ListTile(
-                  title: Text(
-                    d.name.isEmpty ? "(sin nombre)" : d.name,
-                  ),
+                  title: Text(d.name.isEmpty ? "(sin nombre)" : d.name),
                   subtitle: Text("id: ${d.id}\nRSSI: ${d.rssi} dBm"),
                   isThreeLine: true,
                   trailing: ElevatedButton(
@@ -116,7 +113,7 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
             ),
           ),
 
-          // Si ya "conectó", también dejamos el CTA grande, pero ya no dependemos de esto para navegar
+          // CTA para ir a la sesión en vivo si ya hay conexión
           if (ble.isConnected || _connected)
             Padding(
               padding: const EdgeInsets.all(16),
@@ -126,13 +123,23 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
                 onPressed: () => Navigator.pushNamed(context, '/live'),
               ),
             ),
+
+          // =======================
+          // 🔧 BLOQUE DE TEST DEL LED
+          // Se muestra SOLO cuando hay conexión BLE. Comentar si no se usa.
+          if (ble.isConnected)
+            const SizedBox(height: 8),
+          if (ble.isConnected)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: LedTestPanel(ble: ble),
+            ),
+          // =======================
         ],
       ),
 
-      // Botón flotante abajo a la derecha para navegación manual
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
-          // Este menú rápido es solo UI; no bloquea nada.
           showModalBottomSheet(
             context: context,
             builder: (ctx) {
@@ -169,3 +176,58 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
     );
   }
 }
+
+/// Panel de pruebas para encender/apagar LED vía característica de control.
+/// Requiere que BleManager tenga los métodos: ledOn() y ledOff(). Comentar toda la clase si no se usa.
+class LedTestPanel extends StatelessWidget {
+  final BleManager ble;
+  const LedTestPanel({super.key, required this.ble});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        ElevatedButton(
+          onPressed: ble.isConnected ? () async {
+            try {
+              await ble.ledOn();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('LED encendido')),
+                );
+              }
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error: $e')),
+                );
+              }
+            }
+          } : null,
+          child: const Text('Encender LED'),
+        ),
+        OutlinedButton(
+          onPressed: ble.isConnected ? () async {
+            try {
+              await ble.ledOff();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('LED apagado')),
+                );
+              }
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error: $e')),
+                );
+              }
+            }
+          } : null,
+          child: const Text('Apagar LED'),
+        ),
+      ],
+    );
+  }
+}
+
